@@ -150,6 +150,25 @@ class Com_fgsqlreportsInstallerScript
             $merged = array_merge($newParams, $oldParams);
             $merged['migrated_from_fgreports'] = 1;
 
+            // Never carry a plaintext password over: if the old Options still
+            // hold one (saved before encryption existed), encrypt it now
+            // instead of waiting for someone to open and save Options. If
+            // encryption fails, this throws before anything is stored, so the
+            // plaintext value never lands in the new component's params.
+            $pass = (string) ($merged['dbpass'] ?? '');
+
+            if ($pass !== '' && !str_starts_with($pass, 'fgenc:v1:')) {
+                $helperClass = \FG\Component\Fgsqlreports\Administrator\Helper\CryptoHelper::class;
+
+                if (!class_exists($helperClass)) {
+                    // The namespace map isn't necessarily loaded yet during
+                    // the install request itself - load the file directly.
+                    require_once JPATH_ADMINISTRATOR . '/components/com_fgsqlreports/src/Helper/CryptoHelper.php';
+                }
+
+                $merged['dbpass'] = $helperClass::encrypt($pass);
+            }
+
             $db->setQuery(
                 $db->getQuery(true)
                     ->update($db->quoteName('#__extensions'))
