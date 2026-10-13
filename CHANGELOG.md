@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.5
+- The Alias field's help text claimed the alias is "used in the front-end URL", but the front-end links (and menu items) are built from the report ID. The text now says what actually happens: the alias is a unique short name and front-end URLs currently use the ID. Alias-based routing remains a future item (see README, "Known limitations").
+- Deliberately not added: a UNIQUE database index on `alias`. It only becomes worthwhile once aliases are real URLs, and adding it via migration could fail outright on an install that already holds duplicate aliases. When alias routing is implemented, the migration should de-duplicate existing aliases first and then add the index (this also closes the small race window of the application-side uniqueness check in `ReportTable::getUniqueAlias()`).
+
 ## 2.0.4
 - Deleting a report now also clears the component's cache group. Previously a deleted report's cached result set stayed in the cache store (file/DB/Redis) until its TTL ran out - up to 24 hours - even though the report could no longer be opened. The cache cleanup that `save()` already did was moved into a shared helper used by both `save()` and the new `delete()` override.
 - Uninstalling the component clears its cache group too (`uninstall()` in `script.php`), since the uninstall SQL only drops the table and cached results live in Joomla's cache store.
