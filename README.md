@@ -84,7 +84,7 @@ The component was renamed to `com_fgsqlreports` in 2.0.0. Joomla treats a
 different element name as a different extension, so this is a **new
 install, not an update**:
 
-1. Install `com_fgsqlreports_v2.0.1.zip` while the old component is still
+1. Install `com_fgsqlreports_v2.0.2.zip` while the old component is still
    installed. Your reports and Options (including the already-encrypted
    password) are copied over automatically.
 2. Re-create your front-end menu items with the new component (old ones
@@ -109,7 +109,7 @@ actual protection against unwanted writes/deletes is:
    interactive "Run Preview" button additionally requires the
    `fgsqlreports.execute` action, since being able to create/edit a report
    and being able to run ad-hoc SQL interactively are different levels of
-   trust.
+   trust. Changing a report's status or access level requires `core.edit.state`, and changing the SQL of an already published report requires `fgsqlreports.execute` too, so a user who can edit reports cannot publish or alter a live report's SQL on their own.
 3. Both on Save and on Preview, the component shows a **non-blocking
    warning** (nothing is ever refused) if the script contains words like
    `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `EXEC`, `BACKUP`,
