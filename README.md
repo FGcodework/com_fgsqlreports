@@ -84,7 +84,7 @@ The component was renamed to `com_fgsqlreports` in 2.0.0. Joomla treats a
 different element name as a different extension, so this is a **new
 install, not an update**:
 
-1. Install `com_fgsqlreports_v2.0.0.zip` while the old component is still
+1. Install `com_fgsqlreports_v2.0.1.zip` while the old component is still
    installed. Your reports and Options (including the already-encrypted
    password) are copied over automatically.
 2. Re-create your front-end menu items with the new component (old ones

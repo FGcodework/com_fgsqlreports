@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.1
+- Hardened the one-time migration from `com_fgreports` (`script.php`). It used `INSERT ... SELECT *`, which fails with a column-count mismatch whenever the old table doesn't have exactly the same columns as the new one (e.g. an old install that never received `enable_sorting` from 1.9.2). Columns are now matched by name (intersection of both tables), so any old 1.x schema migrates and missing columns get their defaults.
+- The reports copy runs in a transaction (no partial copy on failure). A failure is now written to the Joomla log (category `com_fgsqlreports`) and shown to the admin as a warning, instead of being swallowed silently.
+- The migration is now repeatable: a `migrated_from_fgreports` flag in the component params marks completion, and the migration also runs on `update` (reinstalling the same ZIP), so a failed attempt can be retried after fixing the cause. Reports are only copied while the new table is empty.
+
 ## 2.0.0
 - **Renamed the component from `com_fgreports` to `com_fgsqlreports`**, since "Reports" is too generic for a component that only reports from MS SQL Server and other report types may follow. This renames everything: extension element/folder, namespace (`FG\Component\Fgsqlreports`), DB table (`#__fgsqlreports_reports`), language files and `COM_FGSQLREPORTS_*` keys, ACL action (`fgsqlreports.execute`), cache group, CSS classes, installer script class, GitHub repo/update server URLs.
 - **Breaking: this is a new extension, not an update** of `com_fgreports` - Joomla cannot update across a changed element name. On a fresh install, `script.php` copies the old reports and Options (incl. the encrypted connection password) from `com_fgreports` if the new table is empty; old data is never touched. Menu items and ACL rules are not migrated. See "Upgrading from com_fgreports" in the README.

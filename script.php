@@ -53,7 +53,11 @@ class Com_fgsqlreportsInstallerScript
         try {
             if ($type === 'update') {
                 $this->reencryptLegacyPassword();
-            } elseif ($type === 'install') {
+            }
+
+            // Also on 'update': reinstalling the same ZIP is how a failed
+            // migration gets retried (guarded by the "migrated" flag).
+            if ($type === 'install' || $type === 'update') {
                 $this->migrateFromLegacyComponent();
             }
         } catch (\Throwable $e) {
@@ -64,61 +68,118 @@ class Com_fgsqlreportsInstallerScript
     }
 
     /**
-     * One-time migration from the pre-2.0.0 name of this component
-     * (com_fgreports, table #__fgreports_reports). A fresh install of
-     * com_fgsqlreports copies the old reports and the old Options (including
-     * the already-encrypted connection password) across - but only if the new
-     * table is still empty, and it never touches or deletes the old data.
-     * Menu items and ACL rules of the old component are NOT migrated.
+     * Migration from the pre-2.0.0 name of this component (com_fgreports,
+     * table #__fgreports_reports). Copies the old reports and the old Options
+     * (incl. the already-encrypted connection password) across. Never touches
+     * or deletes the old data. Menu items and ACL rules are NOT migrated.
+     *
+     * - Columns are matched by name (intersection of old and new table), so an
+     *   old table from any 1.x version works; columns missing in the old table
+     *   (e.g. enable_sorting) simply get their default value.
+     * - Reports are only copied while the new table is empty; the reports copy
+     *   runs in a transaction, so a failure leaves no partial copy.
+     * - A flag in the component params marks a completed migration. Until it
+     *   is set, running again (reinstalling the same ZIP counts as an update)
+     *   retries, so a failed attempt can be repeated.
+     * - Failures are written to the Joomla log (category com_fgsqlreports)
+     *   and shown to the admin as a warning.
      */
     private function migrateFromLegacyComponent(): void
     {
-        $db     = Factory::getContainer()->get(\Joomla\Database\DatabaseInterface::class);
-        $tables = array_map('strtolower', $db->getTableList());
-        $old    = strtolower($db->getPrefix() . 'fgreports_reports');
-        $new    = strtolower($db->getPrefix() . 'fgsqlreports_reports');
+        $app = Factory::getApplication();
 
-        if (!\in_array($old, $tables, true) || !\in_array($new, $tables, true)) {
-            return;
-        }
+        try {
+            $db     = Factory::getContainer()->get(\Joomla\Database\DatabaseInterface::class);
+            $tables = array_map('strtolower', $db->getTableList());
+            $old    = strtolower($db->getPrefix() . 'fgreports_reports');
+            $new    = strtolower($db->getPrefix() . 'fgsqlreports_reports');
 
-        $count = (int) $db->setQuery(
-            $db->getQuery(true)->select('COUNT(*)')->from($db->quoteName('#__fgsqlreports_reports'))
-        )->loadResult();
+            if (!\in_array($old, $tables, true) || !\in_array($new, $tables, true)) {
+                return; // Nothing to migrate from (fresh install without the old component).
+            }
 
-        if ($count > 0) {
-            return;
-        }
+            $extQuery = static function ($db, string $element) {
+                return $db->getQuery(true)
+                    ->select($db->quoteName(['extension_id', 'params']))
+                    ->from($db->quoteName('#__extensions'))
+                    ->where($db->quoteName('type') . ' = ' . $db->quote('component'))
+                    ->where($db->quoteName('element') . ' = ' . $db->quote($element));
+            };
 
-        $db->setQuery(
-            'INSERT INTO ' . $db->quoteName('#__fgsqlreports_reports')
-            . ' SELECT * FROM ' . $db->quoteName('#__fgreports_reports')
-        )->execute();
+            $newExt = $db->setQuery($extQuery($db, 'com_fgsqlreports'))->loadAssoc();
+            $newParams = json_decode((string) ($newExt['params'] ?? ''), true) ?: [];
 
-        // Options (connection settings etc.) of the old component.
-        $oldParams = (string) $db->setQuery(
-            $db->getQuery(true)
-                ->select($db->quoteName('params'))
-                ->from($db->quoteName('#__extensions'))
-                ->where($db->quoteName('type') . ' = ' . $db->quote('component'))
-                ->where($db->quoteName('element') . ' = ' . $db->quote('com_fgreports'))
-        )->loadResult();
+            if (!empty($newParams['migrated_from_fgreports'])) {
+                return; // Already migrated.
+            }
 
-        if ($oldParams !== '' && $oldParams !== '{}') {
+            $copied = 0;
+            $count  = (int) $db->setQuery(
+                $db->getQuery(true)->select('COUNT(*)')->from($db->quoteName('#__fgsqlreports_reports'))
+            )->loadResult();
+
+            if ($count === 0) {
+                $common = array_values(array_intersect(
+                    array_keys($db->getTableColumns('#__fgreports_reports', false)),
+                    array_keys($db->getTableColumns('#__fgsqlreports_reports', false))
+                ));
+
+                if ($common) {
+                    $cols = implode(', ', array_map([$db, 'quoteName'], $common));
+
+                    $db->transactionStart();
+
+                    try {
+                        $db->setQuery(
+                            'INSERT INTO ' . $db->quoteName('#__fgsqlreports_reports') . ' (' . $cols . ')'
+                            . ' SELECT ' . $cols . ' FROM ' . $db->quoteName('#__fgreports_reports')
+                        )->execute();
+                        $copied = (int) $db->getAffectedRows();
+                        $db->transactionCommit();
+                    } catch (\Throwable $e) {
+                        $db->transactionRollback();
+                        throw $e;
+                    }
+                }
+            }
+
+            // Options of the old component (connection settings etc.).
+            $oldExt    = $db->setQuery($extQuery($db, 'com_fgreports'))->loadAssoc();
+            $oldParams = json_decode((string) ($oldExt['params'] ?? ''), true) ?: [];
+
+            $merged = array_merge($newParams, $oldParams);
+            $merged['migrated_from_fgreports'] = 1;
+
             $db->setQuery(
                 $db->getQuery(true)
                     ->update($db->quoteName('#__extensions'))
-                    ->set($db->quoteName('params') . ' = ' . $db->quote($oldParams))
-                    ->where($db->quoteName('type') . ' = ' . $db->quote('component'))
-                    ->where($db->quoteName('element') . ' = ' . $db->quote('com_fgsqlreports'))
+                    ->set($db->quoteName('params') . ' = ' . $db->quote(json_encode($merged)))
+                    ->where($db->quoteName('extension_id') . ' = ' . (int) ($newExt['extension_id'] ?? 0))
             )->execute();
-        }
 
-        Factory::getApplication()->enqueueMessage(
-            'FG SQL Reports: reports and Options were copied from the old com_fgreports component. '
-            . 'You can now uninstall com_fgreports and re-create its menu items using the new component.',
-            'message'
-        );
+            $app->enqueueMessage(
+                'FG SQL Reports: reports (' . $copied . ') and Options were copied from the old com_fgreports component. '
+                . 'You can now uninstall com_fgreports and re-create its menu items using the new component.',
+                'message'
+            );
+        } catch (\Throwable $e) {
+            try {
+                \Joomla\CMS\Log\Log::add(
+                    'Migration from com_fgreports failed: ' . $e->getMessage(),
+                    \Joomla\CMS\Log\Log::ERROR,
+                    'com_fgsqlreports'
+                );
+            } catch (\Throwable $ignored) {
+                // Logging must never break the install either.
+            }
+
+            $app->enqueueMessage(
+                'FG SQL Reports: the automatic migration from the old com_fgreports component FAILED ('
+                . $e->getMessage() . '). Nothing was changed in the old component. '
+                . 'Re-install this package to retry, or re-create your reports manually.',
+                'warning'
+            );
+        }
     }
 
     private function reencryptLegacyPassword(): void
