@@ -155,20 +155,44 @@ class ReportModel extends AdminModel
         $result = parent::save($data);
 
         if ($result) {
-            // The front-end cache key already changes with the SQL/modified
-            // content (see Site\Model\ReportModel::runWithCache()), but also
-            // clear the whole group here so old, now-unreachable cache
-            // entries don't just sit on disk until they naturally expire.
-            try {
-                Factory::getContainer()->get(\Joomla\CMS\Cache\CacheControllerFactoryInterface::class)
-                    ->createCacheController('callback', ['defaultgroup' => 'com_fgsqlreports'])
-                    ->clean('com_fgsqlreports');
-            } catch (Exception $e) {
-                // Non-fatal - the content-hash cache key already prevents
-                // stale results from being served either way.
-            }
+            $this->cleanReportCache();
         }
 
         return $result;
+    }
+
+    /**
+     * Deleting a report must also drop its cached result set: the data would
+     * otherwise stay in the configured cache store (file/DB/Redis) until its
+     * TTL runs out, even though the report can no longer be opened.
+     */
+    public function delete(&$pks)
+    {
+        $result = parent::delete($pks);
+
+        if ($result) {
+            $this->cleanReportCache();
+        }
+
+        return $result;
+    }
+
+    /**
+     * Clears the whole com_fgsqlreports cache group. The front-end cache key
+     * already changes with the SQL/modified content (see
+     * Site\Model\ReportModel::runWithCache()), but clearing the group also
+     * removes old, now-unreachable entries instead of leaving them on disk
+     * until they naturally expire.
+     */
+    private function cleanReportCache(): void
+    {
+        try {
+            Factory::getContainer()->get(\Joomla\CMS\Cache\CacheControllerFactoryInterface::class)
+                ->createCacheController('callback', ['defaultgroup' => 'com_fgsqlreports'])
+                ->clean('com_fgsqlreports');
+        } catch (Exception $e) {
+            // Non-fatal - the content-hash cache key already prevents stale
+            // results from being served either way.
+        }
     }
 }

@@ -42,6 +42,24 @@ class Com_fgsqlreportsInstallerScript
     }
 
     /**
+     * Cached report results live in Joomla's cache store, not in this
+     * component's tables, so the uninstall SQL doesn't remove them. Clear the
+     * cache group so no report data outlives the component.
+     */
+    public function uninstall($parent)
+    {
+        try {
+            Factory::getContainer()->get(\Joomla\CMS\Cache\CacheControllerFactoryInterface::class)
+                ->createCacheController('callback', ['defaultgroup' => 'com_fgsqlreports'])
+                ->clean('com_fgsqlreports');
+        } catch (\Throwable $e) {
+            // Never block an uninstall because of cache cleanup.
+        }
+
+        return true;
+    }
+
+    /**
      * On update, re-encrypts a legacy plaintext MS SQL connection password
      * left over from before password encryption was introduced (1.3.0).
      * Never blocks the update - any failure here is swallowed and simply

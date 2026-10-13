@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.4
+- Deleting a report now also clears the component's cache group. Previously a deleted report's cached result set stayed in the cache store (file/DB/Redis) until its TTL ran out - up to 24 hours - even though the report could no longer be opened. The cache cleanup that `save()` already did was moved into a shared helper used by both `save()` and the new `delete()` override.
+- Uninstalling the component clears its cache group too (`uninstall()` in `script.php`), since the uninstall SQL only drops the table and cached results live in Joomla's cache store.
+- The cache key's connection signature now also includes `dbapplicationintent`. With SQL Server Availability Groups the read-only intent can route the connection to a different (possibly lagging) replica, so changing it should not keep serving results fetched the other way.
+- Not changed, deliberately: one cache group for all reports rather than one per report. The cache key already makes edits self-invalidating, so the group clear on save only removes stale entries; the cost is that saving one report also drops the other reports' (cheap to rebuild) cached results.
+
 ## 2.0.3
 - The migration from `com_fgreports` now encrypts the connection password while copying the Options. Previously the old Options were copied verbatim, so a password still stored in plaintext in an old installation (saved before encryption was introduced) would have stayed in plaintext in the new component until someone opened and saved Options. If `dbpass` doesn't start with `fgenc:v1:` it is encrypted with `CryptoHelper::encrypt()` before anything is written; if encryption fails the migration reports the failure and stores nothing, so plaintext is never copied.
 

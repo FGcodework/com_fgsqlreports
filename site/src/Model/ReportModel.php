@@ -232,6 +232,7 @@ class ReportModel extends ItemModel
             $params->get('dbport', ''),
             $params->get('dbname', ''),
             $params->get('dbuser', ''),
+            $params->get('dbapplicationintent', 0),
         ]);
 
         $cacheId = 'report_' . (int) $item->id . '_'
